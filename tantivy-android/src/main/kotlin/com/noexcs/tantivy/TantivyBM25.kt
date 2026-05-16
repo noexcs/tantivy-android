@@ -7,10 +7,10 @@ import java.io.Closeable
  *
  * Usage:
  * ```kotlin
- * val bm25 = TantivyBM25()
- * bm25.rebuildIndex(listOf(Doc("1", "user", "Alice from Beijing")))
- * val results = bm25.search("Beijing", topK = 5)
- * bm25.close()
+ * TantivyBM25().use { bm25 ->
+ *     bm25.rebuildIndex(listOf(Doc("1", "user", "Alice from Beijing")))
+ *     val results = bm25.search("Beijing", topK = 5)
+ * }
  * ```
  *
  * Thread-safe: all public methods acquire an internal Mutex before touching
@@ -70,10 +70,6 @@ class TantivyBM25 : Closeable {
 
     private fun checkNotClosed() {
         check(nativePtr != 0L) { "TantivyBM25 has been closed" }
-    }
-
-    protected fun finalize() {
-        close()
     }
 
     // ─── JNI native methods ───
