@@ -171,16 +171,6 @@ dependencies {
 }
 ```
 
-发布到 Maven Central：
-```bash
-export ORG_GRADLE_PROJECT_ossrhUsername=<your-sonatype-username>
-export ORG_GRADLE_PROJECT_ossrhPassword=<your-sonatype-password>
-export ORG_GRADLE_PROJECT_signingKey="$(gpg --export-secret-keys --armor)"
-export ORG_GRADLE_PROJECT_signingPassword=<key-passphrase>
-
-./gradlew :tantivy-android:publish
-```
-
 ## CI/CD
 
 GitHub Actions：PR/push 触发 Rust 测试，tag (`v*`) 触发 `build_android.sh` + AAR 构建，产物上传为 Release Asset。
