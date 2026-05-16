@@ -108,7 +108,7 @@ class TantivyBM25Test {
         )
         val executor = Executors.newFixedThreadPool(4)
         val latch = CountDownLatch(4)
-        val errors = mutableListOf<Exception>()
+        val errors = mutableListOf<Throwable>()
 
         repeat(4) {
             executor.submit {
