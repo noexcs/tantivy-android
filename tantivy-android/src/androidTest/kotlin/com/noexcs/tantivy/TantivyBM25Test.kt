@@ -128,4 +128,69 @@ class TantivyBM25Test {
         executor.shutdown()
         assertTrue("Concurrent errors: $errors", errors.isEmpty())
     }
+
+    @Test
+    fun phraseSearch() {
+        bm25 = TantivyBM25()
+        bm25!!.rebuildIndex(
+            listOf(
+                Doc("1", "a", "the quick brown fox"),
+                Doc("2", "a", "quick brown fox jumps"),
+                Doc("3", "a", "brown fox is quick"),
+            )
+        )
+        // "brown fox" as phrase — should match docs 1, 2, 3
+        val results = bm25!!.searchPhrase("brown fox", topK = 5)
+        assertTrue(results.containsKey("1"))
+        assertTrue(results.containsKey("2"))
+
+        // "quick brown fox" — both docs start/contain this phrase
+        val exact = bm25!!.searchPhrase("quick brown fox", topK = 5)
+        assertTrue(exact.containsKey("1"))
+        assertTrue(exact.containsKey("2"))
+    }
+
+    @Test
+    fun fuzzySearch() {
+        bm25 = TantivyBM25()
+        bm25!!.rebuildIndex(
+            listOf(Doc("1", "a", "hello world programming"))
+        )
+        // Typo: "proggraming" vs "programming"
+        val results = bm25!!.searchFuzzy("proggraming", distance = 2, topK = 5)
+        assertTrue(results.containsKey("1"))
+    }
+
+    @Test
+    fun searchWithFacets() {
+        bm25 = TantivyBM25()
+        bm25!!.rebuildIndex(
+            listOf(
+                Doc("1", "user", "Alice from Beijing"),
+                Doc("2", "user", "Bob from Shanghai"),
+                Doc("3", "project", "Rust project"),
+                Doc("4", "project", "Kotlin project"),
+                Doc("5", "project", "Python project"),
+                Doc("6", "note", "random note"),
+            )
+        )
+        val result = bm25!!.searchWithFacets("project", topK = 3)
+        assertEquals(3, result.results.size)
+        assertEquals(3L, result.facets["project"])
+        assertNull(result.facets["note"])
+    }
+
+    @Test
+    fun phraseSearchBlankQuery() {
+        bm25 = TantivyBM25()
+        bm25!!.rebuildIndex(listOf(Doc("1", "a", "hello")))
+        assertTrue(bm25!!.searchPhrase("").isEmpty())
+    }
+
+    @Test
+    fun fuzzySearchBlankQuery() {
+        bm25 = TantivyBM25()
+        bm25!!.rebuildIndex(listOf(Doc("1", "a", "hello")))
+        assertTrue(bm25!!.searchFuzzy("").isEmpty())
+    }
 }

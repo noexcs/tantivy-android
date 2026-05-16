@@ -1,12 +1,15 @@
 use tantivy::collector::TopDocs;
 use tantivy::doc;
-use tantivy::query::QueryParser;
+use tantivy::query::{BooleanQuery, FuzzyTermQuery, Occur, PhraseQuery, QueryParser};
 use tantivy::schema::*;
 use tantivy::Index;
 use tantivy::IndexWriter;
 use tantivy::ReloadPolicy;
 use tantivy::Term;
 use tantivy::TantivyError;
+use tantivy::TantivyDocument;
+use tantivy::tokenizer::{TokenStream, Tokenizer};
+use std::collections::HashMap;
 use std::sync::Mutex;
 use crate::tokenizer;
 
@@ -125,30 +128,133 @@ impl IndexManager {
     }
 
     pub fn search(&self, query_str: &str, top_k: usize) -> TantivyResult<Vec<(String, f32)>> {
+        let searcher = self.searcher()?;
+        let query_parser = QueryParser::for_index(&self.index, vec![self.field_text]);
+        let query = query_parser.parse_query(query_str)?;
+        let top_docs = searcher.search(&query, &TopDocs::with_limit(top_k))?;
+        collect_results(&searcher, top_docs, self.field_id)
+    }
+
+    /// Phrase search: matches documents containing the exact phrase.
+    pub fn search_phrase(&self, phrase: &str, top_k: usize) -> TantivyResult<Vec<(String, f32)>> {
+        let searcher = self.searcher()?;
+
+        let query_terms = self.get_query_terms(phrase);
+        let mut phrase_terms: Vec<(usize, Term)> = query_terms
+            .iter()
+            .map(|(pos, text)| (*pos, Term::from_field_text(self.field_text, text)))
+            .collect();
+
+        if phrase_terms.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Build PhraseQuery with (offset, term) pairs
+        phrase_terms.sort_by_key(|(pos, _)| *pos);
+        let terms_with_offsets: Vec<(usize, Term)> = phrase_terms.into_iter().collect();
+
+        let phrase_query = PhraseQuery::new_with_offset(terms_with_offsets);
+        let top_docs = searcher.search(&phrase_query, &TopDocs::with_limit(top_k))?;
+        collect_results(&searcher, top_docs, self.field_id)
+    }
+
+    /// Fuzzy search: matches documents tolerating up to `distance` edits per term.
+    pub fn search_fuzzy(
+        &self,
+        query_str: &str,
+        distance: u8,
+        top_k: usize,
+    ) -> TantivyResult<Vec<(String, f32)>> {
+        let searcher = self.searcher()?;
+
+        let query_terms = self.get_query_terms(query_str);
+        let mut subqueries: Vec<(Occur, Box<dyn tantivy::query::Query>)> = Vec::new();
+        for (_pos, text) in &query_terms {
+            let term = Term::from_field_text(self.field_text, text);
+            subqueries.push((
+                Occur::Should,
+                Box::new(FuzzyTermQuery::new(term, distance, true)),
+            ));
+        }
+
+        if subqueries.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let query = BooleanQuery::new(subqueries);
+        let top_docs = searcher.search(&query, &TopDocs::with_limit(top_k))?;
+        collect_results(&searcher, top_docs, self.field_id)
+    }
+
+    /// Search with facet counts grouped by headerKey.
+    /// Returns (top_results, facet_counts) where facet_counts maps headerKey → count.
+    pub fn search_with_facets(
+        &self,
+        query_str: &str,
+        top_k: usize,
+    ) -> TantivyResult<(Vec<(String, f32)>, HashMap<String, u64>)> {
+        let searcher = self.searcher()?;
+
+        let query_parser = QueryParser::for_index(&self.index, vec![self.field_text]);
+        let query = query_parser.parse_query(query_str)?;
+
+        // Get top results
+        let top_docs = searcher.search(&query, &TopDocs::with_limit(top_k))?;
+        let results = collect_results(&searcher, top_docs, self.field_id)?;
+
+        // Count by headerKey over a larger set for facets
+        let all_docs = searcher.search(&query, &TopDocs::with_limit(1000))?;
+        let mut facet_counts: HashMap<String, u64> = HashMap::new();
+        for (_score, doc_addr) in all_docs {
+            if let Ok(doc) = searcher.doc::<TantivyDocument>(doc_addr) {
+                if let Some(hk) = doc.get_first(self.field_header_key) {
+                    if let Some(hk_str) = hk.as_str() {
+                        *facet_counts.entry(hk_str.to_string()).or_default() += 1;
+                    }
+                }
+            }
+        }
+
+        Ok((results, facet_counts))
+    }
+
+    fn searcher(&self) -> TantivyResult<tantivy::Searcher> {
         let reader = self
             .index
             .reader_builder()
             .reload_policy(ReloadPolicy::Manual)
             .try_into()?;
         reader.reload()?;
+        Ok(reader.searcher())
+    }
 
-        let searcher = reader.searcher();
-        let query_parser = QueryParser::for_index(&self.index, vec![self.field_text]);
-        let query = query_parser.parse_query(query_str)?;
+    fn get_query_terms(&self, text: &str) -> Vec<(usize, String)> {
+        let mut tokenizer = crate::tokenizer::CJKBigramTokenizer;
+        let mut stream = tokenizer.token_stream(text);
+        let mut terms = Vec::new();
+        while stream.advance() {
+            let token = stream.token();
+            terms.push((token.position, token.text.clone()));
+        }
+        terms
+    }
+}
 
-        let top_docs = searcher.search(&query, &TopDocs::with_limit(top_k))?;
-
-        let mut results = Vec::new();
-        for (score, doc_addr) in top_docs {
-            let doc: TantivyDocument = searcher.doc(doc_addr)?;
-            if let Some(id) = doc.get_first(self.field_id) {
-                if let Some(id_str) = id.as_str() {
-                    results.push((id_str.to_string(), score));
-                }
+fn collect_results(
+    searcher: &tantivy::Searcher,
+    top_docs: Vec<(f32, tantivy::DocAddress)>,
+    field_id: Field,
+) -> TantivyResult<Vec<(String, f32)>> {
+    let mut results = Vec::new();
+    for (score, doc_addr) in top_docs {
+        let doc: TantivyDocument = searcher.doc(doc_addr)?;
+        if let Some(id) = doc.get_first(field_id) {
+            if let Some(id_str) = id.as_str() {
+                results.push((id_str.to_string(), score));
             }
         }
-        Ok(results)
     }
+    Ok(results)
 }
 
 #[cfg(test)]
@@ -348,6 +454,51 @@ mod tests {
         let results = mgr.search("document", 10).unwrap();
         assert_eq!(results.len(), 10);
         assert!(results[0].1 > 0.0, "should have positive score");
+    }
+
+    // ─── Advanced features ───
+
+    #[test]
+    fn phrase_search_matches_exact() {
+        let mut mgr = IndexManager::new();
+        mgr.rebuild(&[
+            make_doc("1", "a", "the quick brown fox"),
+            make_doc("2", "a", "quick brown fox jumps"),
+        ])
+        .unwrap();
+
+        // "brown fox" appears in both
+        let results = mgr.search_phrase("brown fox", 5).unwrap();
+        assert_contains(&results, "1");
+        assert_contains(&results, "2");
+
+        // "quick brown fox" appears in both (doc2 starts with it)
+        let exact = mgr.search_phrase("quick brown fox", 5).unwrap();
+        assert_contains(&exact, "1");
+        assert_contains(&exact, "2");
+    }
+
+    #[test]
+    fn fuzzy_search_tolerates_typo() {
+        let mut mgr = IndexManager::new();
+        mgr.rebuild(&[make_doc("1", "a", "hello world programming")]).unwrap();
+        let results = mgr.search_fuzzy("proggraming", 2, 5).unwrap();
+        assert_contains(&results, "1");
+    }
+
+    #[test]
+    fn search_with_facets_counts() {
+        let mut mgr = IndexManager::new();
+        mgr.rebuild(&[
+            make_doc("1", "user", "Alice"),
+            make_doc("2", "user", "Bob"),
+            make_doc("3", "project", "Rust"),
+        ])
+        .unwrap();
+
+        let (results, facets) = mgr.search_with_facets("Alice", 5).unwrap();
+        assert_contains(&results, "1");
+        assert_eq!(facets.get("user"), Some(&1));
     }
 
     // ─── Disk-backed index ───

@@ -197,6 +197,33 @@ pub extern "system" fn Java_com_noexcs_tantivy_TantivyBM25_nativeSearch(
     query: JString,
     top_k: jint,
 ) -> jobject {
+    search_simple(&mut env, ptr, &query, top_k, |idx, q, k| idx.search(q, k))
+}
+
+// ─── nativeSearchPhrase ───
+
+#[no_mangle]
+pub extern "system" fn Java_com_noexcs_tantivy_TantivyBM25_nativeSearchPhrase(
+    mut env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+    phrase: JString,
+    top_k: jint,
+) -> jobject {
+    search_simple(&mut env, ptr, &phrase, top_k, |idx, q, k| idx.search_phrase(q, k))
+}
+
+// ─── nativeSearchFuzzy ───
+
+#[no_mangle]
+pub extern "system" fn Java_com_noexcs_tantivy_TantivyBM25_nativeSearchFuzzy(
+    mut env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+    query: JString,
+    distance: jint,
+    top_k: jint,
+) -> jobject {
     let native = get_index(ptr);
     let idx = match native.lock() {
         Ok(guard) => guard,
@@ -205,7 +232,6 @@ pub extern "system" fn Java_com_noexcs_tantivy_TantivyBM25_nativeSearch(
             return std::ptr::null_mut();
         }
     };
-
     let q = match jstring_to_string(&mut env, &query) {
         Ok(s) => s,
         Err(e) => {
@@ -213,34 +239,125 @@ pub extern "system" fn Java_com_noexcs_tantivy_TantivyBM25_nativeSearch(
             return std::ptr::null_mut();
         }
     };
-
-    let results = match idx.inner.search(&q, top_k as usize) {
+    let results = match idx.inner.search_fuzzy(&q, distance as u8, top_k as usize) {
         Ok(r) => r,
         Err(e) => {
-            throw(&mut env, &format!("Search failed: {}", e));
+            throw(&mut env, &format!("SearchFuzzy failed: {}", e));
+            return std::ptr::null_mut();
+        }
+    };
+    build_hashmap(&mut env, &results)
+}
+
+// ─── nativeSearchWithFacets ───
+
+#[no_mangle]
+pub extern "system" fn Java_com_noexcs_tantivy_TantivyBM25_nativeSearchWithFacets(
+    mut env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+    query: JString,
+    top_k: jint,
+) -> jobject {
+    let native = get_index(ptr);
+    let idx = match native.lock() {
+        Ok(guard) => guard,
+        Err(_) => {
+            throw(&mut env, "Lock poisoned");
+            return std::ptr::null_mut();
+        }
+    };
+    let q = match jstring_to_string(&mut env, &query) {
+        Ok(s) => s,
+        Err(e) => {
+            throw(&mut env, &e);
+            return std::ptr::null_mut();
+        }
+    };
+    let (results, facets) = match idx.inner.search_with_facets(&q, top_k as usize) {
+        Ok(r) => r,
+        Err(e) => {
+            throw(&mut env, &format!("SearchWithFacets failed: {}", e));
             return std::ptr::null_mut();
         }
     };
 
-    let map_class = match env.find_class("java/util/HashMap") {
+    // Return [resultsHashMap, facetsHashMap] as Object[]
+    let obj_array_class = match env.find_class("java/lang/Object") {
         Ok(c) => c,
         Err(e) => {
             throw(&mut env, &format!("{}", e));
             return std::ptr::null_mut();
         }
     };
-    let map = match env.new_object(map_class, "()V", &[]) {
-        Ok(m) => m,
+    let array = match env.new_object_array(2, obj_array_class, JObject::null()) {
+        Ok(a) => a,
         Err(e) => {
             throw(&mut env, &format!("{}", e));
             return std::ptr::null_mut();
         }
     };
 
-    for (id, score) in &results {
-        if env.new_string(id).is_err() {
-            continue;
+    let results_map = build_hashmap(&mut env, &results);
+    let facets_map = build_facet_map(&mut env, &facets);
+
+    let _ = env.set_object_array_element(&array, 0, unsafe { JObject::from_raw(results_map) });
+    let _ = env.set_object_array_element(&array, 1, unsafe { JObject::from_raw(facets_map) });
+
+    array.into_raw()
+}
+
+fn search_simple<F>(
+    env: &mut JNIEnv,
+    ptr: jlong,
+    jquery: &JString,
+    top_k: jint,
+    f: F,
+) -> jobject
+where
+    F: FnOnce(&index::IndexManager, &str, usize) -> index::TantivyResult<Vec<(String, f32)>>,
+{
+    let native = get_index(ptr);
+    let idx = match native.lock() {
+        Ok(guard) => guard,
+        Err(_) => {
+            throw(env, "Lock poisoned");
+            return std::ptr::null_mut();
         }
+    };
+    let q = match jstring_to_string(env, jquery) {
+        Ok(s) => s,
+        Err(e) => {
+            throw(env, &e);
+            return std::ptr::null_mut();
+        }
+    };
+    let results = match f(&idx.inner, &q, top_k as usize) {
+        Ok(r) => r,
+        Err(e) => {
+            throw(env, &format!("Search failed: {}", e));
+            return std::ptr::null_mut();
+        }
+    };
+    build_hashmap(env, &results)
+}
+
+fn build_hashmap(env: &mut JNIEnv, results: &[(String, f32)]) -> jobject {
+    let map_class = match env.find_class("java/util/HashMap") {
+        Ok(c) => c,
+        Err(e) => {
+            throw(env, &format!("{}", e));
+            return std::ptr::null_mut();
+        }
+    };
+    let map = match env.new_object(map_class, "()V", &[]) {
+        Ok(m) => m,
+        Err(e) => {
+            throw(env, &format!("{}", e));
+            return std::ptr::null_mut();
+        }
+    };
+    for (id, score) in results {
         let key = match env.new_string(id) {
             Ok(k) => k,
             Err(_) => continue,
@@ -254,6 +371,44 @@ pub extern "system" fn Java_com_noexcs_tantivy_TantivyBM25_nativeSearch(
             "put",
             "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;",
             &[JValue::Object(&key), JValue::Object(&float_obj)],
+        );
+    }
+    map.into_raw()
+}
+
+fn build_facet_map(env: &mut JNIEnv, facets: &std::collections::HashMap<String, u64>) -> jobject {
+    let map_class = match env.find_class("java/util/HashMap") {
+        Ok(c) => c,
+        Err(e) => {
+            throw(env, &format!("{}", e));
+            return std::ptr::null_mut();
+        }
+    };
+    let map = match env.new_object(map_class, "()V", &[]) {
+        Ok(m) => m,
+        Err(e) => {
+            throw(env, &format!("{}", e));
+            return std::ptr::null_mut();
+        }
+    };
+    for (hk, count) in facets {
+        let key = match env.new_string(hk) {
+            Ok(k) => k,
+            Err(_) => continue,
+        };
+        let long_obj = match env.new_object(
+            "java/lang/Long",
+            "(J)V",
+            &[JValue::Long(*count as i64)],
+        ) {
+            Ok(l) => l,
+            Err(_) => continue,
+        };
+        let _ = env.call_method(
+            &map,
+            "put",
+            "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;",
+            &[JValue::Object(&key), JValue::Object(&long_obj)],
         );
     }
     map.into_raw()

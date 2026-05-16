@@ -5,7 +5,7 @@ use tantivy::tokenizer::*;
 /// overlapping character pairs (bigrams). Non-CJK text is passed through
 /// as-is.
 #[derive(Clone)]
-struct CJKBigramTokenizer;
+pub(crate) struct CJKBigramTokenizer;
 
 impl Tokenizer for CJKBigramTokenizer {
     type TokenStream<'a> = BoxTokenStream<'a>;

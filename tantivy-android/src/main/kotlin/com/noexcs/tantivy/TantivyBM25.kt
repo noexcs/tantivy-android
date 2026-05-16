@@ -66,6 +66,42 @@ class TantivyBM25 private constructor(private var nativePtr: Long) : Closeable {
         return nativeSearch(nativePtr, query, topK)
     }
 
+    /**
+     * Phrase search: matches documents containing the exact phrase.
+     * For example, "brown fox" only matches docs where these words appear
+     * consecutively in order.
+     */
+    fun searchPhrase(phrase: String, topK: Int = 5): Map<String, Float> {
+        checkNotClosed()
+        if (phrase.isBlank()) return emptyMap()
+        return nativeSearchPhrase(nativePtr, phrase, topK)
+    }
+
+    /**
+     * Fuzzy search: tolerates up to [distance] character edits per term.
+     * Useful for typo-tolerant search. For example, "proggraming" with
+     * distance=1 matches "programming".
+     */
+    fun searchFuzzy(query: String, distance: Int = 1, topK: Int = 5): Map<String, Float> {
+        checkNotClosed()
+        if (query.isBlank()) return emptyMap()
+        return nativeSearchFuzzy(nativePtr, query, distance, topK)
+    }
+
+    /**
+     * Search with facet counts grouped by [Doc.headerKey].
+     * Returns both top-K results and the number of matching documents per category.
+     */
+    fun searchWithFacets(query: String, topK: Int = 5): SearchResult {
+        checkNotClosed()
+        if (query.isBlank()) return SearchResult(emptyMap(), emptyMap())
+        @Suppress("UNCHECKED_CAST")
+        val array = nativeSearchWithFacets(nativePtr, query, topK)
+        val results = array[0] as Map<String, Float>
+        val facets = array[1] as Map<String, Long>
+        return SearchResult(results, facets)
+    }
+
     override fun close() {
         if (nativePtr != 0L) {
             nativeClose(nativePtr)
@@ -83,6 +119,9 @@ class TantivyBM25 private constructor(private var nativePtr: Long) : Closeable {
     private external fun nativeAddOrUpdate(ptr: Long, id: String, headerKey: String, text: String)
     private external fun nativeRemoveByHeader(ptr: Long, headerKey: String)
     private external fun nativeSearch(ptr: Long, query: String, topK: Int): Map<String, Float>
+    private external fun nativeSearchPhrase(ptr: Long, phrase: String, topK: Int): Map<String, Float>
+    private external fun nativeSearchFuzzy(ptr: Long, query: String, distance: Int, topK: Int): Map<String, Float>
+    private external fun nativeSearchWithFacets(ptr: Long, query: String, topK: Int): Array<Any>
     private external fun nativeClose(ptr: Long)
 
     companion object {
@@ -102,4 +141,14 @@ data class Doc(
     val id: String,
     val headerKey: String,
     val text: String
+)
+
+/**
+ * Result of [TantivyBM25.searchWithFacets].
+ * @property results Top-K document ID → score map.
+ * @property facets Map of headerKey → matching document count.
+ */
+data class SearchResult(
+    val results: Map<String, Float>,
+    val facets: Map<String, Long>
 )
