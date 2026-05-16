@@ -18,33 +18,33 @@ impl Tokenizer for CJKBigramTokenizer {
         let mut i = 0;
         while i < len {
             if is_cjk(chars[i]) {
-                let start = i;
+                let cjk_start = i;
                 while i < len && is_cjk(chars[i]) {
                     i += 1;
                 }
-                let run_len = i - start;
-                if run_len == 1 {
-                    // Single CJK char: emit as unigram
-                    let offset = chars.iter().take(start).map(|c| c.len_utf8()).sum();
-                    let ch = chars[start];
+                let run_len = i - cjk_start;
+                // Emit unigrams and bigrams at consecutive character positions.
+                // Each bigram shares the position of its first character and has
+                // position_length=2 to indicate it spans two character positions.
+                for j in 0..run_len {
+                    let ch = chars[cjk_start + j];
+                    let char_offset = chars.iter().take(cjk_start + j).map(|c| c.len_utf8()).sum();
                     tokens.push(Token {
-                        offset_from: offset,
-                        offset_to: offset + ch.len_utf8(),
+                        offset_from: char_offset,
+                        offset_to: char_offset + ch.len_utf8(),
                         position: tokens.len(),
                         text: ch.to_string(),
                         position_length: 1,
                     });
-                } else {
-                    // Emit bigrams only at consecutive positions
-                    for j in 0..run_len - 1 {
-                        let bigram = format!("{}{}", chars[start + j], chars[start + j + 1]);
-                        let bigram_offset = chars.iter().take(start + j).map(|c| c.len_utf8()).sum();
+                    if j + 1 < run_len {
+                        let next = chars[cjk_start + j + 1];
+                        let bigram = format!("{}{}", ch, next);
                         tokens.push(Token {
-                            offset_from: bigram_offset,
-                            offset_to: bigram_offset + bigram.len(),
+                            offset_from: char_offset,
+                            offset_to: char_offset + ch.len_utf8() + next.len_utf8(),
                             position: tokens.len(),
                             text: bigram,
-                            position_length: 1,
+                            position_length: 2,
                         });
                     }
                 }

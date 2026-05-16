@@ -159,18 +159,39 @@ mod tests {
     }
 
     #[test]
+    fn cjk_single_char_search_in_long_run() {
+        let mut mgr = IndexManager::new();
+        mgr.rebuild(&[make_doc("1", "news", "今天北京的天气很好")]).unwrap();
+        // Single character "北" from the middle of the run should match
+        assert_contains(&mgr.search("北", 5).unwrap(), "1");
+        assert_contains(&mgr.search("京", 5).unwrap(), "1");
+        assert_contains(&mgr.search("天", 5).unwrap(), "1");
+    }
+
+    #[test]
+    fn cjk_bigram_without_spaces() {
+        let mut mgr = IndexManager::new();
+        // No spaces between CJK characters
+        mgr.rebuild(&[make_doc("1", "n", "我愛日本食物")]).unwrap();
+        assert_contains(&mgr.search("日本", 5).unwrap(), "1");
+        assert_contains(&mgr.search("食物", 5).unwrap(), "1");
+        assert_contains(&mgr.search("愛", 5).unwrap(), "1");
+    }
+
+    #[test]
+    fn cjk_japanese_without_spaces() {
+        let mut mgr = IndexManager::new();
+        mgr.rebuild(&[make_doc("1", "news", "今日は良い天気です")]).unwrap();
+        assert_contains(&mgr.search("天気", 5).unwrap(), "1");
+        assert_contains(&mgr.search("今日", 5).unwrap(), "1");
+        assert_contains(&mgr.search("良", 5).unwrap(), "1");
+    }
+
+    #[test]
     fn cjk_search_matches_bigram() {
         let mut mgr = IndexManager::new();
         mgr.rebuild(&[make_doc("1", "news", "我喜欢吃苹果")]).unwrap();
         let results = mgr.search("苹果", 5).unwrap();
-        assert_contains(&results, "1");
-    }
-
-    #[test]
-    fn cjk_search_japanese() {
-        let mut mgr = IndexManager::new();
-        mgr.rebuild(&[make_doc("1", "news", "今日は良い天気です")]).unwrap();
-        let results = mgr.search("天気", 5).unwrap();
         assert_contains(&results, "1");
     }
 
