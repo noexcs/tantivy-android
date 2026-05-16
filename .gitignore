@@ -1,0 +1,14 @@
+# Rust
+rust/target/
+
+# Android
+.gradle/
+build/
+local.properties
+*.iml
+.idea/
+.kotlin/
+.DS_Store
+
+# JNI libs — tracked to enable direct AAR builds without Rust toolchain
+.claude/

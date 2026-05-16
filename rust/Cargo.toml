@@ -1,0 +1,16 @@
+[package]
+name = "tantivy-android"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "tantivy_android"
+crate-type = ["cdylib"]
+
+[dependencies]
+tantivy = { version = "0.22", default-features = false, features = ["mmap"] }
+jni = "0.21"
+[profile.release]
+lto = true
+opt-level = "z"
+strip = true
