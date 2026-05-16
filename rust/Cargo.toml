@@ -8,7 +8,7 @@ name = "tantivy_android"
 crate-type = ["cdylib"]
 
 [dependencies]
-tantivy = { version = "0.22", default-features = false, features = ["mmap"] }
+tantivy = { version = "0.22", default-features = false }
 jni = "0.21"
 [profile.release]
 lto = true
