@@ -37,6 +37,30 @@ pub extern "system" fn Java_com_noexcs_tantivy_TantivyBM25_nativeCreate(
     Box::into_raw(Box::new(native)) as jlong
 }
 
+// ─── nativeOpenOrCreate ───
+
+#[no_mangle]
+pub extern "system" fn Java_com_noexcs_tantivy_TantivyBM25_nativeOpenOrCreate(
+    mut env: JNIEnv,
+    _class: JClass,
+    path: JString,
+) -> jlong {
+    let path_str = match jstring_to_string(&mut env, &path) {
+        Ok(s) => s,
+        Err(e) => { throw(&mut env, &e); return 0; }
+    };
+    match index::IndexManager::open_or_create(&path_str) {
+        Ok(mgr) => {
+            let native = Mutex::new(NativeIndex { inner: mgr });
+            Box::into_raw(Box::new(native)) as jlong
+        }
+        Err(e) => {
+            throw(&mut env, &format!("Failed to open index: {}", e));
+            0
+        }
+    }
+}
+
 // ─── nativeRebuildIndex ───
 
 #[no_mangle]

@@ -39,10 +39,12 @@ echo "NDK: $ANDROID_NDK_HOME"
 # Build for supported ABIs
 TARGETS=(
     "aarch64-linux-android"
+    "armv7-linux-androideabi"
     "x86_64-linux-android"
 )
 
 ABI_MAP_aarch64_linux_android="arm64-v8a"
+ABI_MAP_armv7_linux_androideabi="armeabi-v7a"
 ABI_MAP_x86_64_linux_android="x86_64"
 
 for target in "${TARGETS[@]}"; do

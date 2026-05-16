@@ -26,27 +26,29 @@ pub struct IndexManager {
 
 pub type TantivyResult<T> = Result<T, TantivyError>;
 
+fn build_schema() -> (Schema, Field, Field, Field) {
+    let mut schema_builder = Schema::builder();
+    let field_id = schema_builder.add_text_field("id", STRING | STORED);
+    let cjk_text_options = TextOptions::default()
+        .set_stored()
+        .set_indexing_options(
+            TextFieldIndexing::default()
+                .set_tokenizer("cjk_bigram")
+                .set_index_option(IndexRecordOption::WithFreqsAndPositions),
+        );
+    let field_header_key = schema_builder.add_text_field("header_key", STRING | STORED);
+    let field_text = schema_builder.add_text_field("text", cjk_text_options);
+    let schema = schema_builder.build();
+    (schema, field_id, field_header_key, field_text)
+}
+
 impl IndexManager {
+    /// Creates an in-memory index (no disk I/O, data lost on close).
     pub fn new() -> Self {
-        let mut schema_builder = Schema::builder();
-        let field_id = schema_builder.add_text_field("id", STRING | STORED);
-
-        // Build the schema with a custom text field that references our CJK tokenizer
-        let cjk_text_options = TextOptions::default()
-            .set_stored()
-            .set_indexing_options(
-                TextFieldIndexing::default()
-                    .set_tokenizer("cjk_bigram")
-                    .set_index_option(IndexRecordOption::WithFreqsAndPositions),
-            );
-        let field_header_key = schema_builder.add_text_field("header_key", STRING | STORED);
-        let field_text = schema_builder.add_text_field("text", cjk_text_options);
-        let schema = schema_builder.build();
-
+        let (schema, field_id, field_header_key, field_text) = build_schema();
         let index = Index::create_in_ram(schema);
         tokenizer::register_cjk_tokenizer(&index, "cjk_bigram");
-
-        let writer = index.writer(15_000_000).expect("Failed to create index writer"); // 15 MB heap
+        let writer = index.writer(15_000_000).expect("Failed to create index writer");
 
         IndexManager {
             index,
@@ -55,6 +57,28 @@ impl IndexManager {
             field_header_key,
             field_text,
         }
+    }
+
+    /// Opens an existing index at `path`, or creates one if it doesn't exist.
+    /// Data persists across sessions (backed by MmapDirectory).
+    pub fn open_or_create(path: &str) -> TantivyResult<Self> {
+        let (schema, field_id, field_header_key, field_text) = build_schema();
+        let dir = tantivy::directory::MmapDirectory::open(path)?;
+        let index = if Index::exists(&dir)? {
+            Index::open(dir)?
+        } else {
+            Index::create(dir, schema, tantivy::IndexSettings::default())?
+        };
+        tokenizer::register_cjk_tokenizer(&index, "cjk_bigram");
+        let writer = index.writer(50_000_000).expect("Failed to create index writer");
+
+        Ok(IndexManager {
+            index,
+            writer: Mutex::new(Some(writer)),
+            field_id,
+            field_header_key,
+            field_text,
+        })
     }
 
     pub fn rebuild(&mut self, docs: &[DocInput]) -> TantivyResult<()> {
@@ -324,5 +348,36 @@ mod tests {
         let results = mgr.search("document", 10).unwrap();
         assert_eq!(results.len(), 10);
         assert!(results[0].1 > 0.0, "should have positive score");
+    }
+
+    // ─── Disk-backed index ───
+
+    #[test]
+    fn disk_index_create_and_search() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_str().unwrap();
+
+        let mut mgr = IndexManager::open_or_create(path).unwrap();
+        mgr.add_or_update("1", "a", "persistent hello world").unwrap();
+
+        let results = mgr.search("persistent", 5).unwrap();
+        assert_contains(&results, "1");
+    }
+
+    #[test]
+    fn disk_index_survives_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_str().unwrap();
+
+        {
+            let mut mgr = IndexManager::open_or_create(path).unwrap();
+            mgr.add_or_update("1", "a", "data that survives").unwrap();
+        } // mgr dropped, index files remain on disk
+
+        {
+            let mgr = IndexManager::open_or_create(path).unwrap();
+            let results = mgr.search("survives", 5).unwrap();
+            assert_contains(&results, "1");
+        }
     }
 }

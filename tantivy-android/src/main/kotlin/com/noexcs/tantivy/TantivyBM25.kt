@@ -7,23 +7,28 @@ import java.io.Closeable
  *
  * Usage:
  * ```kotlin
+ * // In-memory (no persistence)
  * TantivyBM25().use { bm25 ->
  *     bm25.rebuildIndex(listOf(Doc("1", "user", "Alice from Beijing")))
  *     val results = bm25.search("Beijing", topK = 5)
+ * }
+ *
+ * // Disk-backed (persists across sessions)
+ * TantivyBM25(context.filesDir.resolve("search_index").absolutePath).use { bm25 ->
+ *     bm25.addOrUpdate(Doc("42", "note", "会议记录"))
  * }
  * ```
  *
  * Thread-safe: all public methods acquire an internal Mutex before touching
  * the native index. Multiple coroutines may call [search] concurrently.
  */
-class TantivyBM25 : Closeable {
+class TantivyBM25 private constructor(private var nativePtr: Long) : Closeable {
 
-    /** Opaque pointer to the Rust NativeIndex (stored as long to avoid GC issues). */
-    private var nativePtr: Long = 0
+    /** Creates an in-memory index. */
+    constructor() : this(nativeCreate())
 
-    init {
-        nativePtr = nativeCreate()
-    }
+    /** Creates or opens a disk-backed index at the given directory path. */
+    constructor(path: String) : this(nativeOpenOrCreate(path))
 
     /**
      * Replaces the entire index with the given documents.
@@ -74,7 +79,6 @@ class TantivyBM25 : Closeable {
 
     // ─── JNI native methods ───
 
-    private external fun nativeCreate(): Long
     private external fun nativeRebuildIndex(ptr: Long, docs: List<Doc>)
     private external fun nativeAddOrUpdate(ptr: Long, id: String, headerKey: String, text: String)
     private external fun nativeRemoveByHeader(ptr: Long, headerKey: String)
@@ -85,6 +89,9 @@ class TantivyBM25 : Closeable {
         init {
             System.loadLibrary("tantivy_android")
         }
+
+        @JvmStatic private external fun nativeCreate(): Long
+        @JvmStatic private external fun nativeOpenOrCreate(path: String): Long
     }
 }
 

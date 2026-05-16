@@ -20,9 +20,9 @@ Android 生态中缺少一个轻量、支持中文、高性能的全文检索库
 
 - **BM25 评分** — Tantivy 原生实现，生产验证
 - **CJK 分词** — `tantivy-tokenizer-cjk` 中日韩文字双字分词
-- **纯内存索引** — `RamDirectory`，零磁盘 I/O，适合 <10 万文档
+- **纯内存 / 磁盘持久化** — 默认 `RamDirectory` 零磁盘 I/O；支持 `TantivyBM25(path)` 磁盘索引，数据跨 session 保持
 - **增量更新** — 单文档增删，无需全量重建
-- **零依赖 JNI** — 预编译 `.so` 随 AAR 分发，接入方无需 Rust 工具链
+- **零依赖 JNI** — 预编译 `.so` 随 AAR 分发 (arm64-v8a / armeabi-v7a / x86_64)，接入方无需 Rust 工具链
 
 ## 项目结构
 
@@ -177,9 +177,8 @@ GitHub Actions：PR/push 触发 Rust 测试，tag (`v*`) 触发 `build_android.s
 
 ## 限制与 TODO
 
-- [ ] 仅支持内存索引 (`RamDirectory`)，关闭 App 索引丢失（持久化由上层负责）
-- [ ] 仅 arm64-v8a + x86_64，如需 arm-v7a 在 `build_android.sh` 中增加 target
 - [ ] 未暴露 Tantivy 高级特性（facet、phrase query、fuzzy search）— 按需添加
+- [ ] 无 snippet/highlight 等搜索增强功能
 
 ## License
 
