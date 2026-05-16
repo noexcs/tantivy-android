@@ -101,7 +101,10 @@ afterEvaluate {
         }
     }
 
-    signing {
-        sign(publishing.publications["release"])
+    // Only sign when publishing to Maven Central (skip on JitPack / local builds)
+    if (hasProperty("signingKey") || System.getenv("ORG_GRADLE_PROJECT_signingKey") != null) {
+        signing {
+            sign(publishing.publications["release"])
+        }
     }
 }
