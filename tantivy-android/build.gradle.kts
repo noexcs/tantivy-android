@@ -2,9 +2,6 @@ plugins {
     id("com.android.library")
     id("org.jetbrains.kotlin.android")
     id("maven-publish")
-    if (hasProperty("signingKey") || System.getenv("ORG_GRADLE_PROJECT_signingKey") != null) {
-        signing
-    }
 }
 
 group = "com.noexcs"
@@ -103,10 +100,4 @@ afterEvaluate {
         }
     }
 
-    // Only sign when publishing to Maven Central (skip on JitPack / local builds)
-    if (hasProperty("signingKey") || System.getenv("ORG_GRADLE_PROJECT_signingKey") != null) {
-        signing {
-            sign(publishing.publications["release"])
-        }
-    }
 }
