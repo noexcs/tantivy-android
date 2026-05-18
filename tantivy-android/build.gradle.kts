@@ -2,7 +2,9 @@ plugins {
     id("com.android.library")
     id("org.jetbrains.kotlin.android")
     id("maven-publish")
-    signing
+    if (hasProperty("signingKey") || System.getenv("ORG_GRADLE_PROJECT_signingKey") != null) {
+        signing
+    }
 }
 
 group = "com.noexcs"

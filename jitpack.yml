@@ -7,4 +7,3 @@ before_install:
 
 install:
   - ./gradlew :tantivy-android:assembleRelease
-  - ./gradlew :tantivy-android:publishToMavenLocal
