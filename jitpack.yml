@@ -7,5 +7,3 @@ before_install:
 
 install:
   - ./gradlew :tantivy-android:assembleRelease
-  - mkdir -p build/outputs/aar
-  - cp tantivy-android/build/outputs/aar/tantivy-android-release.aar build/outputs/aar/
