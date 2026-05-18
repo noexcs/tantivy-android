@@ -6,4 +6,4 @@ before_install:
   - sdk use java 17.0.12-open
 
 install:
-  - ./gradlew :tantivy-android:assembleRelease
+  - ./gradlew :tantivy-android:publishToMavenLocal
